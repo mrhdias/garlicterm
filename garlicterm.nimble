@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.0.1"
+version       = "0.0.2"
 author        = "Henrique Dias"
 description   = "Another Vte Terminal"
 license       = "MIT"
@@ -11,4 +11,4 @@ skipExt       = @["nim"]
 
 # Deps
 
-requires "nim >= 0.19.0", "oldgtk3 >= 0.1.0", "gintro >= 0.4.7"
+requires "nim >= 1.0.4", "oldgtk3 >= 0.1.0", "gintro >= 0.6.1"
