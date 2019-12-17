@@ -1,6 +1,7 @@
-
 #
 # Another simple gtk3 vte-based terminal
+# Based on the post:
+# https://vincent.bernat.ch/en/blog/2017-write-own-terminal
 #
 
 import gintro/[gtk, glib, gobject, gio, vte, gdkpixbuf, pango]
@@ -8,12 +9,10 @@ import os
 import strutils
 import parsecfg
 
-let environ = getEnviron()
-
 proc handler() {.noconv.} = quit(0)
 
 proc getSettings(): Config =
-    let home = environ.environGetenv("HOME")
+    let home = getEnv("HOME")
 
     let configdir = joinPath(home, ".config", "garlicterm")
     if not existsDir(configdir):
@@ -22,38 +21,40 @@ proc getSettings(): Config =
     let configfile = joinPath(configdir, "garlicterm.ini")
 
     if not existsFile(configfile):
-        var dict = newConfig()
-        dict.setSectionKey("Window", "width", "680")
-        dict.setSectionKey("Window", "height", "390")
-        dict.setSectionKey("Window", "icon", "")
+        var conf = newConfig()
+        conf.setSectionKey("Window", "width", "680")
+        conf.setSectionKey("Window", "height", "390")
+        conf.setSectionKey("Window", "icon", "")
 
-        dict.setSectionKey("Background", "source", "")
-        dict.setSectionKey("Background", "preserve_aspect_ratio", "false")
-        dict.setSectionKey("Background", "opacity", "1.0")
+        conf.setSectionKey("Background", "source", "")
+        conf.setSectionKey("Background", "preserve_aspect_ratio", "false")
+        conf.setSectionKey("Background", "opacity", "1.0")
 
-        dict.setSectionKey("Font", "size", "9")
-        dict.setSectionKey("Font", "family", "Source Code Pro")
+        conf.setSectionKey("Font", "size", "9")
+        conf.setSectionKey("Font", "family", "Source Code Pro")
 
-        dict.writeConfig(configfile)
+        conf.writeConfig(configfile)
 
     return loadConfig(configfile)
+    
 
+proc appActivate(app: Application) =
 
-proc newApp(dict: Config) =
+    let settings = getSettings()
 
-    let win_width: int = parseInt(dict.getSectionValue("Window", "width"))
-    let win_height: int = parseInt(dict.getSectionValue("Window", "height"))
-    let icon_file = dict.getSectionValue("Window", "icon")
-    let background_file = dict.getSectionValue("Background", "source")
-    let preserve_aspect_ratio_conf = dict.getSectionValue("Background", "preserve_aspect_ratio")
+    let win_width: int = parseInt(settings.getSectionValue("Window", "width"))
+    let win_height: int = parseInt(settings.getSectionValue("Window", "height"))
+    let icon_file = settings.getSectionValue("Window", "icon")
+    let background_file = settings.getSectionValue("Background", "source")
+    let preserve_aspect_ratio_conf = settings.getSectionValue("Background", "preserve_aspect_ratio")
     let preserve_aspect_ratio: bool = if preserve_aspect_ratio_conf == "true": true else: false
-    let font_size: int = parseInt(dict.getSectionValue("Font", "size"))
-    let font_family = dict.getSectionValue("Font", "family")
-    let opacity: float = parseFloat(dict.getSectionValue("Background", "opacity"))
+    let font_size: int = parseInt(settings.getSectionValue("Font", "size"))
+    let font_family = settings.getSectionValue("Font", "family")
+    let opacity: float = parseFloat(settings.getSectionValue("Background", "opacity"))
 
-    let window = newWindow()
+    let window = newApplicationWindow(app)
 
-    proc app_exit(win: Window) = mainQuit()
+    proc app_exit(win: ApplicationWindow) = quit()
     window.connect("destroy", app_exit)
 
     window.title = "GarlicTerm"
@@ -64,9 +65,6 @@ proc newApp(dict: Config) =
         window.setIcon(iconpixbuf)
 
     let terminal = newTerminal()
-    
-    let shell = environ.environGetenv("SHELL")
-    var cmd: array[2, cstring] = [shell.cstring, cast[cstring](0)]
 
     discard terminal.setEncoding("UTF-8")
 
@@ -76,7 +74,25 @@ proc newApp(dict: Config) =
 
     terminal.setOpacity(opacity)
 
-#[
+    if not existsEnv("SHELL"):
+        echo "Terminal Error: SHELL environment variable doesn\'t exist!"
+        quit(QuitFailure)
+
+    let shell = getEnv("SHELL")
+    var argv: seq[string]
+    var envv: seq[string]
+
+    argv.add(shell)
+    
+    proc update_title(widget: vte.Terminal, window: ApplicationWindow) =
+        window.set_title(widget.get_window_title())
+
+    proc exit_terminal(widget: Terminal, status: int) = quit(0)
+
+    terminal.connect("window-title-changed", update_title, window)
+    terminal.connect("child-exited", exit_terminal)
+
+    #[
     proc spawnSync(
         workingDirectory: string = "";
         argv: cstringArray;
@@ -88,14 +104,14 @@ proc newApp(dict: Config) =
         standardError: var uint8Array;
         exitStatus: var int
     )
-]#
+    ]#
 
     var pid = 0
     if not terminal.spawnSync(
         cast[PtyFlags](0),
         "",
-        cast[cstringArray](unsafeaddr(cmd)),
-        nil,
+        argv,
+        envv,
         {SpawnFlag.leaveDescriptorsOpen},
         nil,
         nil,
@@ -104,22 +120,11 @@ proc newApp(dict: Config) =
     ):
         echo "Terminal Error!"
         quit(QuitFailure)
-        # mainQuit()
-
-    proc exit_terminal(widget: Terminal, status: int) = mainQuit()
-
-    proc update_title(widget: Terminal, window: Window) =
-        window.set_title(widget.get_window_title())
-
-    terminal.connect("window-title-changed", update_title, window)
-    terminal.connect("child-exited", exit_terminal)
 
     let scroller = newScrolledWindow()
     scroller.setHexpand(true)
     scroller.setVexpand(true)
     scroller.add(terminal)
-    # var width = scroller.getAllocatedWidth()
-    # var height = scroller.getAllocatedHeight()
 
     if len(background_file) > 0 and existsFile(background_file):
         let overlay = newOverlay()
@@ -127,7 +132,6 @@ proc newApp(dict: Config) =
         let pixbuf: gdkpixbuf.Pixbuf = gdkpixbuf.newPixbufFromFileAtScale(background_file, win_width, win_height, preserve_aspect_ratio)
         background.setFromPixbuf(pixbuf)
         overlay.add(background)
-
         overlay.addOverlay(scroller)
         window.add(overlay)
 
@@ -135,18 +139,21 @@ proc newApp(dict: Config) =
         window.add(scroller)
 
     # proc resize_window(widget: ApplicationWindow) =
-    #     echo "Test Resize"
-    # 
+    #     var
+    #         width: int
+    #         height: int
+    #     widget.get_size(width, height)
+    #     echo width, ' ', height
     # window.connect("check-resize", resize_window)
 
-    window.showAll
-
+    showAll(window)
+    
 proc main =
     setControlCHook(handler)
 
-    gtk.init()
-    newApp(getSettings())
-    gtk.main()
-  
+    let app = newApplication("org.gtk.example")
+    connect(app, "activate", appActivate)
+    let status = run(app)
+    quit(status)
 
 main()
