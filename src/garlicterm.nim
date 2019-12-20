@@ -38,9 +38,8 @@ proc getSettings(): Config =
     return loadConfig(configfile)
     
 
-proc appActivate(app: Application) =
 
-    let settings = getSettings()
+proc newApp(settings: Config) =
 
     let win_width: int = parseInt(settings.getSectionValue("Window", "width"))
     let win_height: int = parseInt(settings.getSectionValue("Window", "height"))
@@ -52,9 +51,9 @@ proc appActivate(app: Application) =
     let font_family = settings.getSectionValue("Font", "family")
     let opacity: float = parseFloat(settings.getSectionValue("Background", "opacity"))
 
-    let window = newApplicationWindow(app)
+    let window = newWindow()
 
-    proc app_exit(win: ApplicationWindow) = quit()
+    proc app_exit(win: Window) = mainQuit()
     window.connect("destroy", app_exit)
 
     window.title = "GarlicTerm"
@@ -84,7 +83,7 @@ proc appActivate(app: Application) =
 
     argv.add(shell)
     
-    proc update_title(widget: vte.Terminal, window: ApplicationWindow) =
+    proc update_title(widget: vte.Terminal, window: Window) =
         window.set_title(widget.get_window_title())
 
     proc exit_terminal(widget: Terminal, status: int) = quit(0)
@@ -129,7 +128,11 @@ proc appActivate(app: Application) =
     if len(background_file) > 0 and existsFile(background_file):
         let overlay = newOverlay()
         let background = newImage()
-        let pixbuf: gdkpixbuf.Pixbuf = gdkpixbuf.newPixbufFromFileAtScale(background_file, win_width, win_height, preserve_aspect_ratio)
+        let pixbuf: gdkpixbuf.Pixbuf = gdkpixbuf.newPixbufFromFileAtScale(
+            background_file,
+            win_width,
+            win_height,
+            preserve_aspect_ratio)
         background.setFromPixbuf(pixbuf)
         overlay.add(background)
         overlay.addOverlay(scroller)
@@ -138,7 +141,7 @@ proc appActivate(app: Application) =
     else:
         window.add(scroller)
 
-    # proc resize_window(widget: ApplicationWindow) =
+    # proc resize_window(widget: Window) =
     #     var
     #         width: int
     #         height: int
@@ -151,9 +154,8 @@ proc appActivate(app: Application) =
 proc main =
     setControlCHook(handler)
 
-    let app = newApplication("org.gtk.example")
-    connect(app, "activate", appActivate)
-    let status = run(app)
-    quit(status)
+    gtk.init()
+    newApp(getSettings())
+    gtk.main()
 
 main()
